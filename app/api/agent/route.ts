@@ -1,20 +1,16 @@
-const URL = process.env.HERMES_API_URL ?? "http://127.0.0.1:8642/v1/chat/completions";
-const KEY = process.env.HERMES_API_KEY ?? "warehouse-dev-key-123";
+import { execFile } from "node:child_process";
 
 export async function POST(req: Request) {
   const { prompt = "" }: { prompt?: string } = await req.json().catch(() => ({}));
   if (!prompt.trim()) return Response.json({ error: "empty prompt" }, { status: 400 });
   try {
-    const r = await fetch(URL, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "hermes-agent", stream: false, messages: [{ role: "user", content: prompt }] }),
-      signal: AbortSignal.timeout(280_000),
+    const output = await new Promise<string>((resolve, reject) => {
+      execFile("hermes", ["-z", prompt], { timeout: 280_000, maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) =>
+        err ? reject(new Error(stderr.trim() || err.message)) : resolve(stdout.trim() || "(empty)"),
+      );
     });
-    if (!r.ok) throw new Error(`hermes ${r.status}`);
-    const data = await r.json();
-    return Response.json({ output: data?.choices?.[0]?.message?.content ?? "(empty)" });
+    return Response.json({ output });
   } catch (e) {
-    return Response.json({ error: String(e) }, { status: 502 });
+    return Response.json({ error: `agent failed: ${e instanceof Error ? e.message : String(e)}` }, { status: 502 });
   }
 }
